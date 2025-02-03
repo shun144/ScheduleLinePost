@@ -14,23 +14,9 @@ use Illuminate\Support\Facades\Storage;
 
 class SchedulePostCommand extends Command
 {
-    /**
-     * The name and signature of the console command.
-     *
-     * @var string
-     */
+
     protected $signature = 'app:schedule-post-command';
-
-    /**
-     * The console command description.
-     *
-     * @var string
-     */
     protected $description = 'Command description';
-
-    /**
-     * Execute the console command.
-     */
     public function handle()
     {
         $sep_time = 10;
@@ -45,7 +31,6 @@ class SchedulePostCommand extends Command
 
 
         try {
-
 
             // 配信対象メッセージ抽出
             $messages = DB::table('schedules')
@@ -163,28 +148,67 @@ class SchedulePostCommand extends Command
                 }
             };
 
+            // $contents = [];
+            // $pool = new Pool($client, $requests($requests_param), [
+            //     'concurrency' => 50,
+            //     'fulfilled' => function ($response, $index) use ($requests_param, &$contents) {
+            //         $contents[$requests_param[$index]['key']] = [
+            //         'html'             => $response->getBody()->getContents(),
+            //         'status_code'      => $response->getStatusCode(),
+            //         'response_header'  => $response->getHeaders()
+            //         ];
+
+            //         $contents[$requests_param[$index]['key']]['history_id'] = $requests_param[$index]['history_id'];
+            //         $contents[$requests_param[$index]['key']]['user_name'] = $requests_param[$index]['user_name'];
+            //     },
+            //     'rejected' => function ($reason, $index) use ($requests_param, &$contents) {
+            //         $contents[$requests_param[$index]['key']] = [
+            //         'html'   => '',
+            //         'reason' => $reason
+            //         ];
+            //         $contents[$requests_param[$index]['key']]['history_id'] = $requests_param[$index]['history_id'];
+            //         $contents[$requests_param[$index]['key']]['user_name'] = $requests_param[$index]['user_name'];
+            //     },
+            // ]);
+
             $contents = [];
             $pool = new Pool($client, $requests($requests_param), [
                 'concurrency' => 50,
                 'fulfilled' => function ($response, $index) use ($requests_param, &$contents) {
-                    $contents[$requests_param[$index]['key']] = [
-                    'html'             => $response->getBody()->getContents(),
-                    'status_code'      => $response->getStatusCode(),
-                    'response_header'  => $response->getHeaders()
-                    ];
+                    try {
+                        if (!isset($requests_param[$index]['history_id'], $requests_param[$index]['key'])) {
+                            \Log::error("Response processing failed: Missing history_id or key at index $index");
+                            return;
+                        }
 
-                    $contents[$requests_param[$index]['key']]['history_id'] = $requests_param[$index]['history_id'];
-                    $contents[$requests_param[$index]['key']]['user_name'] = $requests_param[$index]['user_name'];
+                        $contents[$requests_param[$index]['key']] = [
+                            'html'             => $response->getBody()->getContents(),
+                            'status_code'      => $response->getStatusCode(),
+                            'response_header'  => $response->getHeaders()
+                        ];
+                        $contents[$requests_param[$index]['key']]['history_id'] = $requests_param[$index]['history_id'];
+                        $contents[$requests_param[$index]['key']]['user_name'] = $requests_param[$index]['user_name'];
+                    } catch (\Exception $e) {
+                        \Log::error("Response processing {$requests_param[$index]['history_id']}: " . $e->getMessage());
+                    }
                 },
                 'rejected' => function ($reason, $index) use ($requests_param, &$contents) {
+                    if (!isset($requests_param[$index]['history_id'], $requests_param[$index]['key'])) {
+                        \Log::error("Request failed: Missing history_id or key at index $index");
+                        return;
+                    }
+                    $errorMessage = is_object($reason) && method_exists($reason, 'getMessage') ? $reason->getMessage():json_encode($reason);        
+                    \Log::error("Request failed for history_id {$requests_param[$index]['history_id']}: " . $errorMessage);
+        
                     $contents[$requests_param[$index]['key']] = [
-                    'html'   => '',
-                    'reason' => $reason
+                        'html'   => '',
+                        'reason' => $reason
                     ];
                     $contents[$requests_param[$index]['key']]['history_id'] = $requests_param[$index]['history_id'];
                     $contents[$requests_param[$index]['key']]['user_name'] = $requests_param[$index]['user_name'];
-                },
+                }
             ]);
+
             $promise = $pool->promise();
             $promise->wait();
 
