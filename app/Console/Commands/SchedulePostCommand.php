@@ -11,10 +11,13 @@ use GuzzleHttp\Pool;
 use Carbon\Carbon;
 use Illuminate\Support\Facades\Storage;
 
+use Monolog\Logger;
+use Monolog\Level;
+use Monolog\Handler\StreamHandler;
+use Monolog\Handler\RotatingFileHandler;
 
 class SchedulePostCommand extends Command
 {
-
     protected $signature = 'app:schedule-post-command';
     protected $description = 'Command description';
     public function handle()
@@ -139,14 +142,7 @@ class SchedulePostCommand extends Command
             }
             ini_set("max_execution_time",0);
 
-            $client = new Client();
-            $requests = function ($requests_param) use ($client, $API) {
-                foreach ($requests_param as $param) {
-                    yield function() use ($client, $API, $param) {
-                        return $client->requestAsync('POST', $API, $param['params']);
-                    };
-                }
-            };
+
 
             // $contents = [];
             // $pool = new Pool($client, $requests($requests_param), [
@@ -171,13 +167,27 @@ class SchedulePostCommand extends Command
             //     },
             // ]);
 
+            $client = new Client();
+
+            $log = new Logger('async_requests');
+            $log->pushHandler(new RotatingFileHandler(public_path('logs/async_requests.log'), 7,Level::Error ));
+        
+
+            $requests = function ($requests_param) use ($client, $API) {
+                foreach ($requests_param as $param) {
+                    yield function() use ($client, $API, $param) {
+                        return $client->requestAsync('POST', $API, $param['params']);
+                    };
+                }
+            };
+
             $contents = [];
             $pool = new Pool($client, $requests($requests_param), [
                 'concurrency' => 50,
-                'fulfilled' => function ($response, $index) use ($requests_param, &$contents) {
+                'fulfilled' => function ($response, $index) use ($requests_param, &$contents, $log) {
                     try {
                         if (!isset($requests_param[$index]['history_id'], $requests_param[$index]['key'])) {
-                            \Log::error("Response processing failed: Missing history_id or key at index $index");
+                            $log->error("Response processing failed: Missing history_id or key at index $index");
                             return;
                         }
 
@@ -189,16 +199,16 @@ class SchedulePostCommand extends Command
                         $contents[$requests_param[$index]['key']]['history_id'] = $requests_param[$index]['history_id'];
                         $contents[$requests_param[$index]['key']]['user_name'] = $requests_param[$index]['user_name'];
                     } catch (\Exception $e) {
-                        \Log::error("Response processing {$requests_param[$index]['history_id']}: " . $e->getMessage());
+                        $log->error("Response processing {$requests_param[$index]['history_id']}: " . $e->getMessage());
                     }
                 },
-                'rejected' => function ($reason, $index) use ($requests_param, &$contents) {
+                'rejected' => function ($reason, $index) use ($requests_param, &$contents,  $log) {
                     if (!isset($requests_param[$index]['history_id'], $requests_param[$index]['key'])) {
-                        \Log::error("Request failed: Missing history_id or key at index $index");
+                        $log->error("Request failed: Missing history_id or key at index $index");
                         return;
                     }
-                    $errorMessage = is_object($reason) && method_exists($reason, 'getMessage') ? $reason->getMessage():json_encode($reason);        
-                    \Log::error("Request failed for history_id {$requests_param[$index]['history_id']}: " . $errorMessage);
+                    $errorMessage = is_object($reason) && method_exists($reason, 'getMessage') ? $reason->getMessage():json_encode($reason);
+                    $log->error("rejectedエラーhistory_id {$requests_param[$index]['history_id']}: " . $errorMessage);
         
                     $contents[$requests_param[$index]['key']] = [
                         'html'   => '',
