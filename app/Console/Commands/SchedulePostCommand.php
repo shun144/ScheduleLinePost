@@ -183,7 +183,8 @@ class SchedulePostCommand extends Command
 
             $contents = [];
             $pool = new Pool($client, $requests($requests_param), [
-                'concurrency' => 50,
+                // 'concurrency' => 50,
+                'concurrency' => 25,
                 'fulfilled' => function ($response, $index) use ($requests_param, &$contents, $log) {
                     try {
                         if (!isset($requests_param[$index]['history_id'], $requests_param[$index]['key'])) {
