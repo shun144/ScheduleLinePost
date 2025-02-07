@@ -184,7 +184,7 @@ class SchedulePostCommand extends Command
             $contents = [];
             $pool = new Pool($client, $requests($requests_param), [
                 // 'concurrency' => 50,
-                'concurrency' => 25,
+                'concurrency' => 15,
                 'fulfilled' => function ($response, $index) use ($requests_param, &$contents, $log) {
                     try {
                         if (!isset($requests_param[$index]['history_id'], $requests_param[$index]['key'])) {
@@ -239,6 +239,12 @@ class SchedulePostCommand extends Command
             // historyテーブルの更新
             foreach ($history_group as $key => $value)
             {
+                $history = DB::table('histories')->where('id', $key)->first();
+                if (!$history) {
+                    $log->error("histories.id = {$key} not found. Skipping update.");
+                    continue;
+                }
+
                 $result = 'OK';
                 $err = 'ー';
                 
@@ -254,15 +260,33 @@ class SchedulePostCommand extends Command
                     $result = 'NG';
                     $err = join('/', $res);
                 }
-                
-                DB::table('histories')->where('id',$key)
-                ->update(
-                    [
-                        'status'=> $result,
-                        'end_at'=> $end_time,
-                        'err_info' => $err,
-                        'updated_at'=> $end_time
-                    ]);
+
+
+                try {
+                    $affectedRows = DB::table('histories')->where('id', $key)
+                        ->update([
+                            'status' => $result,
+                            'end_at' => $end_time,
+                            'err_info' => $err,
+                            'updated_at' => $end_time
+                        ]);
+            
+                    if ($affectedRows === 0) {
+                        $log->error("Update failed: histories.id = {$key} not updated (no changes).");
+                    }
+
+                } catch (\Exception $e) {
+                    $log->error("Failed to update histories.id = {$key}: " . $e->getMessage());
+                }
+
+                // DB::table('histories')->where('id',$key)
+                // ->update(
+                //     [
+                //         'status'=> $result,
+                //         'end_at'=> $end_time,
+                //         'err_info' => $err,
+                //         'updated_at'=> $end_time
+                //     ]);
             }
         }
         catch (\Exception $e) {
