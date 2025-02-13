@@ -199,12 +199,10 @@ class SchedulePostCommand extends Command
                         $contents[$requests_param[$index]['key']]['history_id'] = $requests_param[$index]['history_id'];
                         $contents[$requests_param[$index]['key']]['user_name'] = $requests_param[$index]['user_name'];
 
-                        // // fulfilled のレスポンス確認
-                        // if ($response->getStatusCode() != 200) {
-                        //     $log->error("📬 配信結果: [history_id: {$requests_param[$index]['history_id']}] [user: {$requests_param[$index]['user_name']}] [status_code: {$response->getStatusCode()}]");
-                        // }                        
-                        $log->error("配信結果: [history_id: {$requests_param[$index]['history_id']}] [user: {$requests_param[$index]['user_name']}] [status_code: {$response->getStatusCode()}]");
- 
+                        // fulfilled のレスポンス確認
+                        if ($response->getStatusCode() != 200) {
+                            $log->error("配信結果: [history_id: {$requests_param[$index]['history_id']}] [user: {$requests_param[$index]['user_name']}] [status_code: {$response->getStatusCode()}]");
+                        } 
                         
                     } catch (\Exception $e) {
                         $log->error("Response processing {$requests_param[$index]['history_id']}: " . $e->getMessage());
