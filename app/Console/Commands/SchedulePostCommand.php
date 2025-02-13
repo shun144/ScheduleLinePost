@@ -122,7 +122,6 @@ class SchedulePostCommand extends Command
                             ]
                         ]);
                     } else {
-
                         array_push($requests_param,
                         [
                             'key' => $history_id. '_' . $msg->message_id . '_' . $line->id,
@@ -199,6 +198,14 @@ class SchedulePostCommand extends Command
                         ];
                         $contents[$requests_param[$index]['key']]['history_id'] = $requests_param[$index]['history_id'];
                         $contents[$requests_param[$index]['key']]['user_name'] = $requests_param[$index]['user_name'];
+
+                        // // fulfilled のレスポンス確認
+                        // if ($response->getStatusCode() != 200) {
+                        //     $log->error("📬 配信結果: [history_id: {$requests_param[$index]['history_id']}] [user: {$requests_param[$index]['user_name']}] [status_code: {$response->getStatusCode()}]");
+                        // }                        
+                        $log->error("配信結果: [history_id: {$requests_param[$index]['history_id']}] [user: {$requests_param[$index]['user_name']}] [status_code: {$response->getStatusCode()}]");
+ 
+                        
                     } catch (\Exception $e) {
                         $log->error("Response processing {$requests_param[$index]['history_id']}: " . $e->getMessage());
                     }
@@ -217,6 +224,19 @@ class SchedulePostCommand extends Command
                     ];
                     $contents[$requests_param[$index]['key']]['history_id'] = $requests_param[$index]['history_id'];
                     $contents[$requests_param[$index]['key']]['user_name'] = $requests_param[$index]['user_name'];
+
+
+                    // 4. rejected のエラー確認
+                    if (isset($requests_param[$index]['history_id'], $requests_param[$index]['user_name'])) {
+                        $historyId = $requests_param[$index]['history_id'];
+                        $userName = $requests_param[$index]['user_name'];
+                    } else {
+                        $historyId = 'Unknown';
+                        $userName = 'Unknown';
+                    }
+                    $statusCode = is_object($reason) && method_exists($reason, 'getCode') ? $reason->getCode() : 'N/A';
+                    $errorMessage = is_object($reason) && method_exists($reason, 'getMessage') ? $reason->getMessage() : json_encode($reason, JSON_UNESCAPED_UNICODE);
+                    $log->error("配信失敗: [history_id: {$historyId}] [user: {$userName}] [status_code: {$statusCode}] [error: {$errorMessage}]");
                 }
             ]);
 
@@ -232,8 +252,19 @@ class SchedulePostCommand extends Command
                 }
                 return $groups;
             }
+
+            // $contents のエラー内容を確認
+            foreach ($contents as $key => $value) {
+                if ($value['status_code'] != 200) {
+                    $log->error("配信エラー: history_id={$value['history_id']}, user={$value['user_name']}, status_code={$value['status_code']}");
+                    $log->error("レスポンス詳細: " . json_encode($value['html'], JSON_UNESCAPED_UNICODE));
+                }
+            }
+            
+
             $history_group = group_by($contents, 'history_id');
 
+        
             $end_time = Carbon::now();
 
             // historyテーブルの更新
@@ -248,8 +279,13 @@ class SchedulePostCommand extends Command
                 $result = 'OK';
                 $err = 'ー';
                 
-                $res = array_map(function ($col) {
+                $res = array_map(function ($col) use ($log){
                     $json = json_decode($col['html']);
+
+                    if (!$json || !isset($json->status) || !isset($json->message)) {
+                        $log->error("JSONデコードエラー: history_id={$col['history_id']}, user={$col['user_name']}, data=" . json_encode($col['html']));
+                        return "[{$col['user_name']}] JSONデコードエラー";
+                    }
                     return '['.$col['user_name'].']'.$json->status.'::'.$json->message;
                 }, array_filter($value, function ($col) {
                     return $col['status_code'] != '200';
@@ -261,7 +297,6 @@ class SchedulePostCommand extends Command
                     $err = join('/', $res);
                 }
 
-
                 try {
                     $affectedRows = DB::table('histories')->where('id', $key)
                         ->update([
@@ -272,27 +307,25 @@ class SchedulePostCommand extends Command
                         ]);
             
                     if ($affectedRows === 0) {
-                        $log->error("Update failed: histories.id = {$key} not updated (no changes).");
+
+                        // 6. $affectedRows === 0 の場合のデバッグ
+                        $historyCheck = DB::table('histories')->where('id', $key)->first();
+                        if (!$historyCheck) {
+                            $log->error("Histories id {$key} does not exist in the database before update.");
+                        } else {
+                            $log->error("Histories id {$key} exists but update did not affect any rows. Current status: " . $historyCheck->status);
+                        }
                     }
 
                 } catch (\Exception $e) {
                     $log->error("Failed to update histories.id = {$key}: " . $e->getMessage());
                 }
-
-                // DB::table('histories')->where('id',$key)
-                // ->update(
-                //     [
-                //         'status'=> $result,
-                //         'end_at'=> $end_time,
-                //         'err_info' => $err,
-                //         'updated_at'=> $end_time
-                //     ]);
             }
         }
         catch (\Exception $e) {
-            \Log::error('エラー機能:スケジュール配信 【配信時間:'.$date_down.'】');
-            \Log::error('エラー箇所:'.$e->getFile().'【'.$e->getLine().'行目】');
-            \Log::error('エラー内容:'.$e->getMessage());
+            Log::error('エラー機能:スケジュール配信 【配信時間:'.$date_down.'】');
+            Log::error('エラー箇所:'.$e->getFile().'【'.$e->getLine().'行目】');
+            Log::error('エラー内容:'.$e->getMessage());
         }
     }
 }
